@@ -1,0 +1,33 @@
+# 忽略 slam_in_autonomous_driving 整个文件夹
+slam_in_autonomous_driving/
+
+# 忽略 slambook2 中的编译生成文件
+slambook2/*.d
+slambook2/*.slo
+slambook2/*.lo
+slambook2/*.o
+slambook2/*.obj
+slambook2/*.gch
+slambook2/*.pch
+slambook2/*.so
+slambook2/*.dylib
+slambook2/*.dll
+slambook2/*.mod
+slambook2/*.smod
+slambook2/*.lai
+slambook2/*.la
+slambook2/*.a
+slambook2/*.lib
+slambook2/*.exe
+slambook2/*.out
+slambook2/*.app
+
+# 忽略 slambook2 中的构建目录和工具文件
+slambook2/*cmake-build-*
+slambook2/*.idea
+slambook2/**build**
+
+# 忽略 slambook2 中的3rdparty文件夹
+slambook2/.vscode
+slambook2/3rdparty
+
