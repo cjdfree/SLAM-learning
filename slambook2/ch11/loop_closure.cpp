@@ -15,12 +15,14 @@ using namespace std;
 int main(int argc, char **argv) {
     // read the images and database  
     cout << "reading database" << endl;
-    DBoW3::Vocabulary vocab("./vocabulary.yml.gz");
-    // DBoW3::Vocabulary vocab("./vocab_larger.yml.gz");  // use large vocab if you want: 
+    // DBoW3::Vocabulary vocab("./vocabulary.yml.gz");
+    DBoW3::Vocabulary vocab("./vocab_larger.yml.gz");  // use large vocab if you want: 
     if (vocab.empty()) {
         cerr << "Vocabulary does not exist." << endl;
         return 1;
     }
+
+    // 读取图片
     cout << "reading images... " << endl;
     vector<Mat> images;
     for (int i = 0; i < 10; i++) {
@@ -41,11 +43,11 @@ int main(int argc, char **argv) {
     }
 
     // we can compare the images directly or we can compare one image to a database 
-    // images :
+    // 比较每两张照片之间的相似程度，使用循环，外层遍历10章，内层遍历每一张之后的，工作10*(10-1)/2=45次
     cout << "comparing images with images " << endl;
     for (int i = 0; i < images.size(); i++) {
         DBoW3::BowVector v1;
-        vocab.transform(descriptors[i], v1);
+        vocab.transform(descriptors[i], v1);  // 每次比较的内容是使用已有字典，将ORB描述子进行转换后的结果
         for (int j = i; j < images.size(); j++) {
             DBoW3::BowVector v2;
             vocab.transform(descriptors[j], v2);
@@ -55,14 +57,14 @@ int main(int argc, char **argv) {
         cout << endl;
     }
 
-    // or with database 
+    // or with database : 与创建出的字典进行比较
     cout << "comparing images with database " << endl;
     DBoW3::Database db(vocab, false, 0);
     for (int i = 0; i < descriptors.size(); i++)
         db.add(descriptors[i]);
     cout << "database info: " << db << endl;
     for (int i = 0; i < descriptors.size(); i++) {
-        DBoW3::QueryResults ret;
+        DBoW3::QueryResults ret;  // 创建字典中的查询变量ret
         db.query(descriptors[i], ret, 4);      // max result=4
         cout << "searching for image " << i << " returns " << ret << endl << endl;
     }

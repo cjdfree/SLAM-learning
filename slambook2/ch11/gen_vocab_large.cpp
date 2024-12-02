@@ -55,8 +55,8 @@ int main( int argc, char** argv )
     cout<<"creating vocabulary, please wait ... "<<endl;
     DBoW3::Vocabulary vocab;
     vocab.create( descriptors );
-    cout<<"vocabulary info: "<<vocab<<endl;
-    vocab.save( "vocab_larger.yml.gz" );
+    cout<<"vocabulary info: "<<vocab<<endl;  // 字典信息
+    vocab.save( "vocab_larger.yml.gz" );  // 保存字典
     cout<<"done"<<endl;
     
     return 0;

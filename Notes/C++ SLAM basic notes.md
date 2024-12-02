@@ -1960,17 +1960,9 @@ undefined reference to `g2o::csparse::CSparse::CSparse()`
 - 目前`CSparse`项目是已经集成到了`SuiteSparse` 中，没有单独的github项目支持了（2024年11月25日）
 - 源码编译安装`SuiteSparse`遇到了一些问题解决不了（最有可能解决的方法）
 
-
-
-
-
 #### 运行
 
 `g2o`使用图模型来描述问题结构，整体结构和之前的第六章相同，然后同样调用了`common.cppp`和其他编写的文件，用`g2o`的方法来运行程序即可。
-
-
-
-
 
 ## 后端2
 
@@ -2049,25 +2041,247 @@ PTAM的核心思想是将传统SLAM的两大任务：**相机姿态估计（Trac
 
 
 
+## 回环检测
+
+回环检测的关键就是如何**有效地检测出相机经过了同一个地方，采集到了相似的数据**。
+
+回环检测对于SLAM系统意义重大：
+
+- 估计的轨迹和地图在长时间下的准确性
+- 利用回环检测进行**重定位**：如果我们事先对于某个场景录制了一条轨迹并构建了地图，在之后一直使用这个地图在对机器人进行定位。
+
+回环检测的方法：
+
+- 基于里程计（Odometry based）的几何关系：在经过某个位置附近是，检测他们是否有回环关系，但是这种想法存在逻辑问题：
+  - 回环检测的目标在于发现相机回到之前位置的事实
+  - 但是这个假设是“假设相机回到了之前位置”
+- 基于外观（Appearence based）的：根据两幅图像的相似性进行判断是否回到同一位置，工程中一般使用这种方法。
+  - 词袋模型（Bag of words）：使用相似点的类型和数量进行度量
+
+### 词袋模型和字典
+
+需要生成字典，一般是以树的结构来生成字典，基于无监督聚类的思想来生成字典。（此处和机器学习的联系比较紧密）
+
+- 案例基于10张图片，使用ORB提取特征，按照特征来创建字典。
+- 实际使用的字典往往是在更大的数据集上训练形成的（预训练的思想）
+
+构建词袋模型需要使用`DBow3`库：https://github.com/rmsalinas/DBow3，需要从cmake构建。
+
+#### 创建字典
+
+`feature_training.cpp`构建字典的过程：主要是检测出ORB特征和使用`DBoW3::Vocabulary`构建字典
+
+```C++
+// detect ORB features
+cout<<"detecting ORB features ... "<<endl;
+Ptr< Feature2D > detector = ORB::create();
+vector<Mat> descriptors;
+for ( Mat& image:images )
+{
+    vector<KeyPoint> keypoints; 
+    Mat descriptor;
+    detector->detectAndCompute( image, Mat(), keypoints, descriptor );
+    descriptors.push_back( descriptor );
+}
+
+// create vocabulary 
+cout<<"creating vocabulary ... "<<endl;
+DBoW3::Vocabulary vocab;  // 使用DBoW3::Vocabulary构造函数
+vocab.create( descriptors );
+cout<<"vocabulary info: "<<vocab<<endl;
+vocab.save( "vocabulary.yml.gz" );  // 保存字典
+cout<<"done"<<endl;
+```
+
+运行结果为：构建了一个k=10分支，L=5深度的数，可以容纳$10^{5}$个单词。
+
+```bash
+reading images... 
+detecting ORB features ... 
+creating vocabulary ... 
+vocabulary info: Vocabulary: k = 10, L = 5, Weighting = tf-idf, Scoring = L1-norm, Number of words = 4972
+```
+
+#### 回环检测（相似度比较）
+
+`loop_closure.cpp`：相似度计算，进行回环检测。主要过程是使用由10张图片创建的ORB特征和字典进行比较，这样做可能会过拟合。
+
+```C++
+cout << "detecting ORB features ... " << endl;
+    Ptr<Feature2D> detector = ORB::create();
+    vector<Mat> descriptors;
+    for (Mat &image:images) {
+        vector<KeyPoint> keypoints;
+        Mat descriptor;
+        detector->detectAndCompute(image, Mat(), keypoints, descriptor);
+        descriptors.push_back(descriptor);
+    }
+
+    // we can compare the images directly or we can compare one image to a database 
+    // 比较每两张照片之间的相似程度，使用循环，外层遍历10章，内层遍历每一张之后的，工作10*(10-1)/2=45次
+    cout << "comparing images with images " << endl;
+    for (int i = 0; i < images.size(); i++) {
+        DBoW3::BowVector v1;
+        vocab.transform(descriptors[i], v1);  // 每次比较的内容是使用已有字典，将ORB描述子进行转换后的结果
+        for (int j = i; j < images.size(); j++) {
+            DBoW3::BowVector v2;
+            vocab.transform(descriptors[j], v2);
+            double score = vocab.score(v1, v2);
+            cout << "image " << i << " vs image " << j << " : " << score << endl;
+        }
+        cout << endl;
+    }
+
+    // or with database : 与创建出的字典进行比较
+    cout << "comparing images with database " << endl;
+    DBoW3::Database db(vocab, false, 0);
+    for (int i = 0; i < descriptors.size(); i++)
+        db.add(descriptors[i]);
+    cout << "database info: " << db << endl;
+    for (int i = 0; i < descriptors.size(); i++) {
+        DBoW3::QueryResults ret;  // 创建字典中的查询变量ret
+        db.query(descriptors[i], ret, 4);      // max result=4
+        cout << "searching for image " << i << " returns " << ret << endl << endl;
+    }
+    cout << "done." << endl;
+```
+
+运行结果：
+
+图像之间的比较结果：依次列出了各个分数，可以看到差别并不是很大。
+
+```bash
+comparing images with images 
+image 0 vs image 0 : 1
+image 0 vs image 1 : 0.0305829
+image 0 vs image 2 : 0.0221928
+image 0 vs image 3 : 0.0308756
+image 0 vs image 4 : 0.0231492
+image 0 vs image 5 : 0.0240249
+image 0 vs image 6 : 0.0240589
+image 0 vs image 7 : 0.0246117
+image 0 vs image 8 : 0.0287788
+image 0 vs image 9 : 0.0542239
+```
+
+图像和数据库的比较结果：例如对于图9，除了和自己很像之外（<EntryId: 9, Score: 1>），还和图1很像，这是符合预期结果的，但是可以看到各个分数之间的差别并不大，这种结果实际上表现得**并不显著**。
+
+```bash
+searching for image 9 returns 4 results:
+<EntryId: 9, Score: 1>
+<EntryId: 0, Score: 0.0542239>
+<EntryId: 3, Score: 0.0345848>
+<EntryId: 1, Score: 0.0330308>
+```
+
+#### 创建更大的字典
+
+- `gen_vocab_large.cpp`：创建更大的字典，这个需要2900张图片，先不运行了
+- `loop_closure.cpp`：回环检测
 
 
 
+## 建图
+
+地图即所有路标点的集合，地图的作用有以下几点，一般是根据使用需求来定：
+
+- 定位：定位是地图的基本功能，机器人根据地图找到自己的位置。
+- 导航：机器人可以在所建地图中定位的基础上，进行**路进规划**，寻找两个地图点间的最短路径，需要可以判断哪些地方可以通过，哪些地方不能通过。
+- 重建：有稀疏重建和稠密重建，即把整个场景重新做出来
+- 交互：机器人作为智能体，可以和环境进行交互，类似于**强化学习**的概念，同时在这个层次也需要地图具有**语义信息**。
+
+视觉SLAM建图一般有三大类方法，根据传感器类型来分：
+
+- 立体视觉：计算量相对RGB-D较大，但更适用于室外的场景，相对来说对于光照等环境因素没有RGB-D那么敏感
+  - 单目相机+三角化测量
+  - 双目相机
+- RGB-D
+
+### 单目稠密重建
+
+需要用到极线搜索，块匹配：
+
+- 极线搜索：已知某个点的像素投影，推测另一边图像上的位置时候，得到另一像素所在位置是以在一条线上，称为**极线**，而要找到该点就是在极线上搜索。
+- 块匹配：不单独比较每一个像素的相似度，而使用$w*w$的小块进行比较。评价指标有SAD（Sum of Absolute Difference），SSD（sum of Squared Distance），NCC（Normalized Cross Correlation）
+
+![image-20241202172021735](./C++ SLAM basic notes.assets/image-20241202172021735.png)
+
+在极线上进行相似性度量，会得到沿着极线的一个相似度指标分布，一般使用概率分布来描述确定的深度值，而深度估计也可以被建模为一个概率估计问题，然后又在估计其中的不确定性。估计稠密深度的一个完整过程为：
+
+```
+1. 假设所有像素的深度满足某个初始的高斯分布。
+2. 当新数据产生时，通过极线搜索和块匹配确定投影点位置。
+3. 根据几何关系计算三角化后的深度及不确定性。
+4. 将当前观测融合进上一次的估计中。若收敛则停止计算，否则返回第2步。
+```
+
+实践：单目稠密重建
+
+- 数据集，`REMODE`的数据集相关研究，可以在学院官网找到链接：https://rpg.ifi.uzh.ch/software_datasets.html，但是官网数据集的下载链接失效了，另外在网上找到的下载链接为：https://www.aliyundrive.com/s/DY15VEi3pXh。
+- 代码：`dense_monocular/dense_mapping.cpp`，笔记看代码文件。
+
+运行结果：一共运行200个循环，会有一部分的问题，像书上提到的那样
+
+- 像素梯度：打印机表面为纯白块，如果小块为白色区域里面的某个点，那么区分度不高容易引起误匹配。反映了**立体视觉依赖物体表面的纹理**，属于算法的先天缺陷，这也是目前SLAM算法虽然成熟，但是在一些特定场景中还存在**鲁棒性**需要进行研究。
+- 逆深度：直接把像素梯度假设为高斯分布的参数化形式不一定合理，实际情况在用高斯分布不好描述所有点的距离，用**逆深度**会好一点，可以自己手动改逆深度。
+- GPU并行化运算：这个程序是写在CPU上运行，在实验中能感受到运行的速度比较慢。
 
 
 
+### RGB-D稠密建图
+
+需要使用点云库PCL（Point Cloud Library）：是基于C++的点云处理库，使用的人群挺多。
+
+- github：https://github.com/PointCloudLibrary/pcl
+- 官网：https://pointclouds.org/
+
+点云处理的库，还有一个**更现代**的：https://github.com/isl-org/Open3D，支持C++和Python。
+
+安装PCL，推荐直接安装预编译版本
+
+```bash
+sudo apt install libpcl-dev pcl-tools
+```
+
+数据集选用ICL-NUIM，是一个仿真的RGB-D数据集。
+
+结果可视化，使用PCL_viewer
+
+```bash
+pcl_viewer map.pcd
+```
+
+![image-20241202212454903](./C++ SLAM basic notes.assets/image-20241202212454903.png)
+
+### 从点云重建网格
+
+使用的算法是Moving Least Square 和 Greedy Projection。
+
+```bash
+./dense_RGBD/surfel_mapping map.pcd
+```
+
+![image-20241202212909178](./C++ SLAM basic notes.assets/image-20241202212909178.png)
+
+### 八叉树地图
+
+安装`octomap`库，使用`octovis`可视化八叉树地图。
+
+```bash
+sudo apt install liboctomap-dev octovis
+```
+
+![image-20241202214102822](./C++ SLAM basic notes.assets/image-20241202214102822.png)
+
+### 编译报错处理
+
+我每次运行程序的时候总是一段一段编译，按照这篇文章中的整个进行编译：https://blog.csdn.net/qq_44164791/article/details/131284692，有些问题就不会出现，真的太抽象了。
 
 
 
+## SLAM系统
 
-
-
-
-
-
-
-
-
-
+使用到KITTI数据集，下载里程计数据，官网地址：[Download odometry data set (grayscale, 22 GB)](https://s3.eu-central-1.amazonaws.com/avg-kitti/data_odometry_gray.zip)
 
 
 

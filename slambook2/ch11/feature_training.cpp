@@ -36,10 +36,10 @@ int main( int argc, char** argv ) {
     
     // create vocabulary 
     cout<<"creating vocabulary ... "<<endl;
-    DBoW3::Vocabulary vocab;
+    DBoW3::Vocabulary vocab;  // 使用DBoW3::Vocabulary构造函数
     vocab.create( descriptors );
     cout<<"vocabulary info: "<<vocab<<endl;
-    vocab.save( "vocabulary.yml.gz" );
+    vocab.save( "vocabulary.yml.gz" );  // 保存字典
     cout<<"done"<<endl;
     
     return 0;

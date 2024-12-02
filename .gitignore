@@ -28,6 +28,9 @@ slambook2/*.idea
 slambook2/**build**
 
 # 忽略 slambook2 中的3rdparty文件夹
-slambook2/.vscode
 slambook2/3rdparty
+
+# 忽略.vscode文件
+.vscode
+slambook2/.vscode
 
