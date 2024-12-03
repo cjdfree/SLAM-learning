@@ -45,9 +45,7 @@ void Backend::Optimize(Map::KeyframesType &keyframes,
     typedef g2o::BlockSolver_6_3 BlockSolverType;
     typedef g2o::LinearSolverCSparse<BlockSolverType::PoseMatrixType>
         LinearSolverType;
-    auto solver = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<BlockSolverType>(
-            g2o::make_unique<LinearSolverType>()));
+    auto solver = new g2o::OptimizationAlgorithmLevenberg(std::make_unique<BlockSolverType>(std::make_unique<LinearSolverType>()));
     g2o::SparseOptimizer optimizer;
     optimizer.setAlgorithm(solver);
 

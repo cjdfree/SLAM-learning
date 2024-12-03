@@ -273,6 +273,108 @@ int main() {
 - 当调用 `add(1, 2)` 时，编译器实例化 `add<int>(int a, int b)`。
 - 当调用 `add(1.5, 2.5)` 时，编译器实例化 `add<double>(double a, double b)`。
 
+## 上锁
+
+### 基本概念
+
+在C++中，“对变量上锁”通常是指在多线程编程中，使用同步机制保护共享变量或资源，以防止多个线程同时访问或修改该变量而导致数据竞争（Data Race）或不一致的情况。
+
+“上锁”是一种确保**线程安全性**的操作，主要目的是：
+
+1. **防止数据竞争**：当多个线程同时访问和修改同一变量时，上锁可以确保只有一个线程能够在某一时刻对变量进行操作。
+2. **保证数据一致性**：通过上锁确保线程按照预期顺序访问共享变量，避免读取不完整或错误的数据。
+
+### 实现上锁
+
+在C++中，可以使用多种方式对变量上锁：
+
+#### 使用 `std::mutex`
+
+C++11 引入了 `std::mutex`，它是一种互斥锁，用于保护共享资源。在这个例子中，`mtx.lock()` 和 `mtx.unlock()` 确保了对 `sharedVariable` 的访问是线程安全的。
+
+```C++
+#include <iostream>
+#include <thread>
+#include <mutex>
+
+std::mutex mtx; // 定义一个互斥锁
+int sharedVariable = 0; // 共享变量
+
+void increment() {
+    mtx.lock(); // 上锁
+    ++sharedVariable; 
+    std::cout << "Thread " << std::this_thread::get_id() << ": " << sharedVariable << std::endl;
+    mtx.unlock(); // 解锁
+}
+
+int main() {
+    std::thread t1(increment);
+    std::thread t2(increment);
+    t1.join();
+    t2.join();
+    return 0;
+}
+```
+
+#### **使用 `std::lock_guard`**
+
+`std::lock_guard` 是 C++11 提供的一个 RAII（资源获取即初始化）风格的锁管理工具，它会在构造时上锁，在析构时自动解锁，减少了忘记解锁的风险。
+
+```C++
+#include <iostream>
+#include <thread>
+#include <mutex>
+
+std::mutex mtx; 
+int sharedVariable = 0;
+
+void increment() {
+    std::lock_guard<std::mutex> lock(mtx); // 自动上锁并在作用域结束时解锁
+    ++sharedVariable;
+    std::cout << "Thread " << std::this_thread::get_id() << ": " << sharedVariable << std::endl;
+}
+
+int main() {
+    std::thread t1(increment);
+    std::thread t2(increment);
+    t1.join();
+    t2.join();
+    return 0;
+}
+```
+
+#### **使用 `std::unique_lock`**
+
+`std::unique_lock` 提供了比 `std::lock_guard` 更灵活的锁管理功能。例如，可以延迟上锁、手动解锁/重新上锁等。
+
+```C++
+#include <iostream>
+#include <thread>
+#include <mutex>
+
+std::mutex mtx; 
+int sharedVariable = 0;
+
+void increment() {
+    std::unique_lock<std::mutex> lock(mtx); // 上锁
+    ++sharedVariable;
+    std::cout << "Thread " << std::this_thread::get_id() << ": " << sharedVariable << std::endl;
+    lock.unlock(); // 提前解锁
+}
+
+int main() {
+    std::thread t1(increment);
+    std::thread t2(increment);
+    t1.join();
+    t2.join();
+    return 0;
+}
+```
+
+## 调试
+
+
+
 # SLAM十四讲代码
 
 ## Eigen
@@ -1934,7 +2036,7 @@ void AngleAxisAndCenterToCamera(const double *angle_axis,
 
 #### 运行结果
 
-优化后的点云直观上看具有更明显的结构特征，证明优化的效果好
+优化后的点云直观上看具有**更明显的结构特征**，证明优化的效果好
 
 `initial.ply`
 
@@ -2282,6 +2384,102 @@ sudo apt install liboctomap-dev octovis
 ## SLAM系统
 
 使用到KITTI数据集，下载里程计数据，官网地址：[Download odometry data set (grayscale, 22 GB)](https://s3.eu-central-1.amazonaws.com/avg-kitti/data_odometry_gray.zip)
+
+### 项目结构
+
+文件夹目录：
+
+- ch13（根目录）
+  - bin：存储编译的二进制文件
+  - app
+    - CMakeLists.txt
+    - run_kitti_sterro.cpp：主程序文件
+  - cmake_modules：存放第三方库的`.cmake`文件
+  - config：配置文件
+    - default.yaml：整个项目的默认配置，设置数据集的文件夹路径，相机内参，提取的特征点数量
+  - include/myslam：存放头文件`.h`，主要编写帧frame，相机camera，路标点mappoint，特征feature类等，定义数据结构
+  - src：存放项目的源代码文件`.cpp`，编写各种类之间的交互逻辑
+
+### 数据结构
+
+- frame：处理的基本单元是**图像**，在双目视觉中，一般用**一帧**来代表**一对图像**，即每时刻来自两个摄像头的两张图像
+- feature：每一张图片里面会提取出**特征点**
+- mappoint：使用特征点来估计**路标点**
+
+![image-20241203144014909](./C++ SLAM basic notes.assets/image-20241203144014909.png)
+
+### 算法架构
+
+区分前后端的计算任务：
+
+- 前端：图像作为前端计算任务的输入，做里程计的任务，包括特征点追踪，位姿估计，三角化等计算
+- 后端：全局优化，回环检测
+- 地图：前端和后端共同更新的数据
+
+![image-20241203144405047](./C++ SLAM basic notes.assets/image-20241203144405047.png)
+
+### 报错调整
+
+#### 找不到`gdal`和`curl`
+
+报错：找不到`gdal`和`curl`
+
+```bash
+error:/usr/bin/ld: /lib/x86_64-linux-gnu/libgdal.so.34: undefined reference to `curl_easy_getinfo@CURL_OPENSSL_4'
+```
+
+参考[stack overflow](https://stackoverflow.com/questions/16476196/undefined-reference-to-curl-global-init-curl-easy-init-and-other-functionc)，是因为没有指定链接，在CMakeLists.txt中指定之后就可以完成
+
+```cmake
+set(CMAKE_CXX_FLAGS_RELEASE  "-std=c++17 -O3 -fopenmp -pthread -lcurl")
+```
+
+#### Segmentation fault (core dumped)
+
+编译程序成功后，运行`./bin/run_kitti_stereo`遇到报错：核心已转储
+
+参考博客：
+
+- https://blog.csdn.net/sinat_39720504/article/details/102481421，但不免费
+- https://blog.csdn.net/qq_39779233/article/details/128402594，免费，有两个报错
+
+参考github issue：https://github.com/gaoxiang12/slambook2/issues/18，将config.cpp作出一定调整
+
+但是上面的并不能解决问题，又尝试了其他的方法，但是仍然无法解决，这个Segmentation fault (core dumped)的问题似乎会出现在很多的情况中。
+
+### 代码阅读
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -144,9 +144,7 @@ int Frontend::EstimateCurrentPose() {
     typedef g2o::BlockSolver_6_3 BlockSolverType;
     typedef g2o::LinearSolverDense<BlockSolverType::PoseMatrixType>
         LinearSolverType;
-    auto solver = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<BlockSolverType>(
-            g2o::make_unique<LinearSolverType>()));
+    auto solver = new g2o::OptimizationAlgorithmLevenberg(std::make_unique<BlockSolverType>(std::make_unique<LinearSolverType>()));
     g2o::SparseOptimizer optimizer;
     optimizer.setAlgorithm(solver);
 
@@ -288,11 +286,12 @@ bool Frontend::StereoInit() {
     return false;
 }
 
+// 修改前的代码
 int Frontend::DetectFeatures() {
     cv::Mat mask(current_frame_->left_img_.size(), CV_8UC1, 255);
     for (auto &feat : current_frame_->features_left_) {
         cv::rectangle(mask, feat->position_.pt - cv::Point2f(10, 10),
-                      feat->position_.pt + cv::Point2f(10, 10), 0, CV_FILLED);
+                      feat->position_.pt + cv::Point2f(10, 10), 0, cv::FILLED);
     }
 
     std::vector<cv::KeyPoint> keypoints;
@@ -307,6 +306,61 @@ int Frontend::DetectFeatures() {
     LOG(INFO) << "Detect " << cnt_detected << " new features";
     return cnt_detected;
 }
+
+
+// 修改后的代码
+/*
+int Frontend::DetectFeatures() {
+    // 检查 current_frame_ 和 left_img_ 是否为空
+    if (current_frame_ == nullptr || current_frame_->left_img_.empty()) {
+        LOG(ERROR) << "current_frame_ or left_img_ is null!";
+        return 0;
+    }
+
+    // 创建 mask，用于限制检测区域
+    cv::Mat mask(current_frame_->left_img_.size(), CV_8UC1, 255);
+
+    // 遍历 current_frame_ 中的特征点，并为这些特征点周围区域设置为 0（排除区域）
+    for (auto &feat : current_frame_->features_left_) {
+        // 检查 feat 是否为空
+        if (feat == nullptr) {
+            LOG(ERROR) << "Feature pointer is null!";
+            continue;
+        }
+
+        // 输出特征点位置，帮助调试
+        LOG(INFO) << "Feature position: " << feat->position_.pt;
+
+        // 计算矩形区域，避免越界
+        cv::Point2f top_left = feat->position_.pt - cv::Point2f(10, 10);
+        cv::Point2f bottom_right = feat->position_.pt + cv::Point2f(10, 10);
+        
+        // 确保矩形区域不会超出图像边界
+        top_left = cv::Point2f(std::max(0.f, top_left.x), std::max(0.f, top_left.y));
+        bottom_right = cv::Point2f(std::min(static_cast<float>(current_frame_->left_img_.cols - 1), bottom_right.x), std::min(static_cast<float>(current_frame_->left_img_.rows - 1), bottom_right.y));
+                
+        // 绘制矩形
+        cv::rectangle(mask, top_left, bottom_right, 0, cv::FILLED);
+    }
+
+    // 使用 GFTTDetector 检测新的特征点
+    std::vector<cv::KeyPoint> keypoints;
+    gftt_->detect(current_frame_->left_img_, keypoints, mask);
+
+    int cnt_detected = 0;
+    // 将检测到的特征点添加到 current_frame_->features_left_ 中
+    for (auto &kp : keypoints) {
+        current_frame_->features_left_.push_back(
+            Feature::Ptr(new Feature(current_frame_, kp)));
+        cnt_detected++;
+    }
+
+    // 输出检测到的新特征点数量
+    LOG(INFO) << "Detect " << cnt_detected << " new features";
+
+    return cnt_detected;
+}
+*/
 
 int Frontend::FindFeaturesInRight() {
     // use LK flow to estimate points in the right image
